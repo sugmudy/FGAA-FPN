@@ -1,5 +1,9 @@
 # FGAA-FPN with Oriented R-CNN (MMRotate)
 
+This repository corresponds to the paper 
+**"Foreground-Guided Angle-Aware Network for Enhanced Oriented Object Detection"**, 
+which has been submitted to *The Visual Computer*.
+
 This README is aligned with the current implementation in:
 
 - `configs/oriented_rcnn/oriented_rcnn_r50_FGAAFPN.py`
@@ -8,6 +12,9 @@ This README is aligned with the current implementation in:
 - `mmrotate/models/necks/fgaafpn/bifpn.py`
 - `mmrotate/models/necks/fgaafpn/aamha.py`
 - `mmrotate/models/necks/fgaafpn/fg_vis.py`
+This repository corresponds to the paper 
+**"Foreground-Guided Angle-Aware Network for Enhanced Oriented Object Detection"**, 
+which has been submitted to *The Visual Computer*.
 
 ## 1. Overview
 
