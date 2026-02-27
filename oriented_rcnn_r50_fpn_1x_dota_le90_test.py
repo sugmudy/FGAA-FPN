@@ -14,7 +14,7 @@ metainfo = dict(
 )
 
 custom_imports = dict(
-    imports=['mmrotate.models.necks.FGAA_FPN'], 
+    imports=['mmrotate.models.necks.fgaafpn.FGAAFPN'], 
     allow_failed_imports=False
 )
 
@@ -32,7 +32,7 @@ model = dict(
         style='pytorch',
         init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet50')),
     neck=dict(
-        type='ABMAFPN',
+        type='FGAAFPN',
         in_channels=[256, 512, 1024, 2048],
         out_channels=256,
         num_outs=5,
@@ -42,15 +42,15 @@ model = dict(
         relu_before_extra_convs=False,
 
         # ===== BiFPN 结构 =====
-        num_bifpn_layers=0,           # 可以先设 2 或  3
+        num_bifpn_layers=0,           
         use_separable_conv=False,
 
         # ===== 前景分支 (弱监督) =====
-        fgam_enable=True,
+        fgfm_enable=True,
         # 建议在较高层做前景, 避免低层噪声太多
-        fgam_levels=[2,3,4],     # 对应 P4~P7 (因为 P3 是 level 0)
-        fgam_alpha=0.8,               # gating 强度, 0.5 ~ 1.0 之间可以试
-        fgam_fg_loss_weight=0.7,      # 前景弱监督 loss 权重
+        fgfm_levels=[2,3,4],     # 对应 P4~P7 (因为 P3 是 level 0)
+        fgfm_alpha=0.8,               # gating 强度, 0.5 ~ 1.0 之间可以试
+        fgfm_fg_loss_weight=0.7,      # 前景弱监督 loss 权重
 
         # ===== 多头注意力 =====
         use_attn=False,
