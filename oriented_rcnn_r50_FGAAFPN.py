@@ -38,28 +38,28 @@ model = dict(
         num_outs=5,
         start_level=0,
         end_level=-1,
-        add_extra_convs=False,        # 先不用额外 P6/P7 conv
+        add_extra_convs=False,        
         relu_before_extra_convs=False,
 
-        # ===== BiFPN 结构 =====
+        # ===== BiFPN  =====
         num_bifpn_layers=0,           
         use_separable_conv=False,
 
-        # ===== 前景分支 (弱监督) =====
+        # ===== FGFM branch =====
         fgfm_enable=True,
-        # 建议在较高层做前景, 避免低层噪声太多
-        fgfm_levels=[2,3,4],     # 对应 P4~P7 (因为 P3 是 level 0)
-        fgfm_alpha=0.8,               # gating 强度, 0.5 ~ 1.0 之间可以试
-        fgfm_fg_loss_weight=0.7,      # 前景弱监督 loss 权重
 
-        # ===== 多头注意力 =====
+        fgfm_levels=[2,3,4],     
+        fgfm_alpha=0.8,               
+        fgfm_fg_loss_weight=0.7,      
+
+        # ===== AAMHA branch =====
         use_attn=False,
-        attn_levels=[ 2, 3, 4 ],        # 在 P3,P4,P5 做 attention, P6,P7 不做
+        attn_levels=[ 2, 3, 4 ],        
         attn_num_heads=4,
-        attn_embed_dim=256,           # 与 out_channels 一致
+        attn_embed_dim=256,         
         attn_dropout=0.1,
-        attn_beta=0.6,                # 前景 bias 强度
-        attn_orient_scale=0.7,        # 方向偏置强度
+        attn_beta=0.6,                
+        attn_orient_scale=0.7,        
     ),
     rpn_head=dict(
         type='OrientedRPNHead',
@@ -207,3 +207,4 @@ data = dict(
 
 work_dir = './work_dirs6/oriented_rcnn_dota15_r50_fgamfpn_1x'
 optimizer = dict(lr=0.005)
+
