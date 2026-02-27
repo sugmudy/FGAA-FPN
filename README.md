@@ -2,7 +2,7 @@
 
 This README is aligned with the current implementation in:
 
-- `configs/oriented_rcnn/oriented_rcnn_r50_fpn_1x_dota_le90_test.py`
+- `configs/oriented_rcnn/oriented_rcnn_r50_FGAAFPN.py`
 - `mmrotate/models/necks/fgaafpn/FGAAFPN.py`
 - `mmrotate/models/necks/fgaafpn/fgfm.py`
 - `mmrotate/models/necks/fgaafpn/bifpn.py`
@@ -11,7 +11,7 @@ This README is aligned with the current implementation in:
 
 ## 1. Overview
 
-FGAA-FPN is a custom neck for rotated object detection that extends FPN with:
+FGAA-FPN is a custom neck for oriented object detection that extends FPN with:
 
 - FGFM: Foreground-Guided Feature Modulation.
 - AAMHA: Angle-Aware Multi-Head Attention.
@@ -66,7 +66,7 @@ Visualization is triggered only when:
 
 Output path is controlled by `fg_vis_save_dir`.
 
-## 6. Full Config Breakdown (`oriented_rcnn_r50_fpn_1x_dota_le90_test.py`)
+## 6. Full Config Breakdown (`oriented_rcnn_r50_FGAAFPN.py`)
 
 ## 6.1 Global Config Keys
 
@@ -184,17 +184,7 @@ Current steps:
 - `DefaultFormatBundle`
 - `Collect(keys=['img','gt_bboxes','gt_labels'])`
 
-### `data`
 
-Dataset root in current config:
-
-- `data_root = 'data/split_DOTA/'`
-
-Splits:
-
-- train: `train/images`, `train/labelTxt`
-- val: `val/images`, `val/labelTxt`
-- test: `val/images`, `val/labelTxt` with `test_mode=True`
 
 ## 7. FGAAFPN Parameter Reference
 
@@ -286,14 +276,9 @@ Splits:
 Single GPU:
 
 ```bash
-python tools/train.py configs/oriented_rcnn/oriented_rcnn_r50_fpn_1x_dota_le90_test.py
+python tools/train.py configs/oriented_rcnn/oriented_rcnn_r50_FGAAFPN.py
 ```
 
-Distributed training:
-
-```bash
-bash tools/dist_train.sh configs/oriented_rcnn/oriented_rcnn_r50_fpn_1x_dota_le90_test.py 8
-```
 
 Evaluation:
 
@@ -303,31 +288,3 @@ python tools/test.py \
   work_dirs6/oriented_rcnn_dota15_r50_fgamfpn_1x/latest.pth \
   --eval mAP
 ```
-
-## 10. Troubleshooting
-
-### No visualization images are saved
-
-Check all of these:
-
-- `fg_vis_enable=True`
-- `fg_vis_prob` not too small
-- current level included in `fg_vis_levels`
-- `fg_vis_save_dir` is writable
-
-### Neck import/build errors
-
-Check:
-
-- `custom_imports` path is correct
-- `type='FGAAFPN'` matches registered class
-
-### FGFM loss is not added to total loss
-
-Current neck exposes `get_fgfm_loss(...)`.
-
-If your detector loop calls `get_fgam_loss(...)`, add a compatibility adapter or rename one side so method names match.
-
-## 11. License
-
-Use Apache-2.0 for this project (aligned with MMRotate in this workspace).
