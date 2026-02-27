@@ -1,268 +1,333 @@
-# FGAA-FPN
-Foreground-Guided Angle-Aware Network for Enhanced Oriented Object Detection
-# FGAA-FPN
+# FGAA-FPN with Oriented R-CNN (MMRotate)
 
-Foreground-Guided Angle-Aware Feature Pyramid Network for Rotated Object Detection (based on MMRotate).
+This README is aligned with the current implementation in:
 
-## 1. 项目简介
-FGAA-FPN 是一个面向旋转目标检测的 Neck 结构，在传统 FPN 的基础上引入三个核心模块：
-
-- Foreground-Guided Feature Modulation (FGFM): 通过前景掩码对金字塔特征进行门控增强。
-- Angle-Aware Multi-Head Attention (AAMHA): 在选定尺度上施加带方向偏置和前景偏置的自注意力。
-- BiFPN Refinement: 通过可学习融合权重进行双向多尺度特征融合。
-
-该实现已接入当前仓库的两阶段检测器训练流程：
-`RotatedTwoStageDetector.forward_train` 会自动额外收集 `neck.get_fgam_loss(...)` 返回的损失。
-
-## 2. 方法结构
-整体前向流程：
-
-1. Backbone 输出多尺度特征 `C2~C5`。
-2. FPN 侧向卷积 + 自顶向下融合，得到初始 `P` 特征。
-3. FGFM（可选）在指定层预测前景图并进行门控调制。
-4. AAMHA（可选）在指定层施加角度感知注意力。
-5. BiFPN（可选）进行若干层双向融合。
-6. 输出多尺度特征给 RPN/ROI Head。
-
-## 3. 代码位置
-核心代码位于：
-
+- `configs/oriented_rcnn/oriented_rcnn_r50_fpn_1x_dota_le90_test.py`
 - `mmrotate/models/necks/fgaafpn/FGAAFPN.py`
 - `mmrotate/models/necks/fgaafpn/fgfm.py`
-- `mmrotate/models/necks/fgaafpn/aamha.py`
 - `mmrotate/models/necks/fgaafpn/bifpn.py`
-- `mmrotate/models/necks/FGAA_FPN.py`（兼容导入入口）
+- `mmrotate/models/necks/fgaafpn/aamha.py`
+- `mmrotate/models/necks/fgaafpn/fg_vis.py`
 
-示例配置：
+## 1. Overview
 
-- `configs/oriented_rcnn/FGAM.py`
-- `configs/oriented_rcnn/oriented_rcnn_r50_fpn_1x_dota_le90_test.py`
+FGAA-FPN is a custom neck for rotated object detection that extends FPN with:
 
-## 4. 环境安装
-建议使用与当前仓库依赖一致的环境（`mmcv-full 1.x + mmdet 2.x`）。
+- FGFM: Foreground-Guided Feature Modulation.
+- AAMHA: Angle-Aware Multi-Head Attention.
+- BiFPN: Learnable bi-directional multi-scale fusion.
+- Optional foreground-mask visualization for debugging.
 
-```bash
-conda create -n fgaafpn python=3.8 -y
-conda activate fgaafpn
+It is used in an Oriented R-CNN training setup on DOTA-style data.
 
-pip install -U openmim
-mim install "mmcv-full>=1.5.0"
-mim install "mmdet>=2.25.1,<3.0.0"
-
-pip install -r requirements.txt
-pip install -v -e .
-```
-
-说明：
-
-- 若你已在现有 MMRotate 环境中开发，可跳过重复安装。
-- CUDA / PyTorch / mmcv-full 版本需相互匹配。
-
-## 5. 数据准备（以 DOTA 为例）
-默认配置使用：`data/split_DOTA/`
-
-目录示例：
+## 2. What Each File Does
 
 ```text
-data/split_DOTA/
-  train/
-    images/
-    labelTxt/
-  val/
-    images/
-    labelTxt/
+mmrotate/models/necks/fgaafpn/
+  FGAAFPN.py    -> Main neck: FPN + FGFM + AAMHA + BiFPN + FGFM loss
+  fgfm.py       -> FGSegHead and FGWeightNet
+  aamha.py      -> AngleAwareMHABlock
+  bifpn.py      -> BiFPNBlock and DepthwiseSeparableConv
+  fg_vis.py     -> _debug_vis_fg_mask_single visualization utility
+  __init__.py   -> Exports modules
 ```
 
-## 6. 快速开始
-### 6.1 训练
-单卡训练：
+## 3. Forward Flow in FGAAFPN
 
-```bash
-python tools/train.py configs/oriented_rcnn/FGAM.py
+1. Build lateral features and FPN conv outputs.
+2. If `fgfm_enable=True`, compute foreground masks and gate features.
+3. Perform standard top-down fusion.
+4. Add extra levels if configured.
+5. If `use_attn=True`, apply angle-aware attention on `attn_levels`.
+6. Apply `num_bifpn_layers` BiFPN blocks.
+7. Return tuple of multi-level feature maps.
+
+## 4. FGFM Loss
+
+`FGAAFPN.get_fgfm_loss(img_metas, gt_bboxes)`:
+
+- Rasterizes rotated GT boxes to weak foreground masks per level.
+- Computes weighted BCE + Dice (`lambda_dice=0.6`).
+- Averages across selected levels.
+- Returns `dict(loss_fgam_fg=...)`.
+
+## 5. Foreground Visualization (Manual On/Off)
+
+Visualization code is split from `FGAAFPN.py` into:
+
+- `mmrotate/models/necks/fgaafpn/fg_vis.py`
+- function `_debug_vis_fg_mask_single(...)`
+
+Visualization is triggered only when:
+
+- `fg_vis_enable=True`
+- level is included in `fg_vis_levels`
+- random sampling condition `rand < fg_vis_prob` is satisfied
+
+Output path is controlled by `fg_vis_save_dir`.
+
+## 6. Full Config Breakdown (`oriented_rcnn_r50_fpn_1x_dota_le90_test.py`)
+
+## 6.1 Global Config Keys
+
+| Key | Role |
+|---|---|
+| `_base_` | Inherits dataset/schedule/runtime defaults |
+| `metainfo` | Class names |
+| `custom_imports` | Imports custom FGAA-FPN module before model build |
+| `angle_version` | Angle convention (`le90`) |
+| `model` | Full detector structure |
+| `img_norm_cfg` | Image normalization mean/std |
+| `train_pipeline` | Data preprocessing and augmentation |
+| `data` | Dataset roots and split definitions |
+| `work_dir` | Training output folder |
+| `optimizer` | Optimizer hyperparameters |
+
+## 6.2 `custom_imports`
+
+Use:
+
+```python
+custom_imports = dict(
+    imports=['mmrotate.models.necks.fgaafpn.FGAAFPN'],
+    allow_failed_imports=False
+)
 ```
 
-或使用你的测试配置：
+This ensures `FGAAFPN` is registered before `build_detector`.
+
+## 6.3 `model` Block
+
+### Backbone (`ResNet`)
+
+The current config uses standard ResNet-50 settings for Oriented R-CNN:
+
+- `depth=50`
+- `out_indices=(0,1,2,3)`
+- `frozen_stages=1`
+- BN normalization with `requires_grad=True`
+- torchvision pretrained initialization
+
+### Neck (`FGAAFPN`)
+
+Current style:
+
+```python
+neck=dict(
+    type='FGAAFPN',
+    in_channels=[256, 512, 1024, 2048],
+    out_channels=256,
+    num_outs=5,
+    start_level=0,
+    end_level=-1,
+    add_extra_convs=False,
+    relu_before_extra_convs=False,
+
+    num_bifpn_layers=0,
+    use_separable_conv=False,
+
+    fgfm_enable=True,
+    fgfm_levels=[2,3,4],
+    fgfm_alpha=0.8,
+    fgfm_fg_loss_weight=0.7,
+
+    fg_vis_enable=False,
+    fg_vis_levels=[0],
+    fg_vis_prob=0.05,
+    fg_vis_thr=0.7,
+    fg_vis_save_dir='work_dirs2/fg_vis2',
+
+    use_attn=False,
+    attn_levels=[2,3,4],
+    attn_num_heads=4,
+    attn_embed_dim=256,
+    attn_dropout=0.1,
+    attn_beta=0.6,
+    attn_orient_scale=0.7,
+)
+```
+
+### RPN Head (`OrientedRPNHead`)
+
+Current config uses:
+
+- AnchorGenerator with strides `[4,8,16,32,64]`
+- MidpointOffsetCoder with `angle_range=le90`
+- BCE classification loss + SmoothL1 bbox loss
+
+### RoI Head (`OrientedStandardRoIHead`)
+
+Current config uses:
+
+- `RotatedSingleRoIExtractor` with `RoIAlignRotated`
+- `RotatedShared2FCBBoxHead`
+- `DeltaXYWHAOBBoxCoder` for final rotated box regression
+
+### Train/Test Config
+
+- RPN assigner/sampler and proposal settings are explicitly configured.
+- RCNN assigner uses rotated IoU calculator (`RBboxOverlaps2D`).
+- Test stage uses score threshold, NMS, and max-per-image settings.
+
+## 6.4 Data and Pipeline
+
+### `train_pipeline`
+
+Current steps:
+
+- `LoadImageFromFile`
+- `LoadAnnotations(with_bbox=True)`
+- `RResize(img_scale=(1024,1024))`
+- `RRandomFlip` with 3 flip directions
+- `Normalize`
+- `Pad(size_divisor=32)`
+- `DefaultFormatBundle`
+- `Collect(keys=['img','gt_bboxes','gt_labels'])`
+
+### `data`
+
+Dataset root in current config:
+
+- `data_root = 'data/split_DOTA/'`
+
+Splits:
+
+- train: `train/images`, `train/labelTxt`
+- val: `val/images`, `val/labelTxt`
+- test: `val/images`, `val/labelTxt` with `test_mode=True`
+
+## 7. FGAAFPN Parameter Reference
+
+### 7.1 Base FPN Parameters
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `in_channels` | list[int] | Backbone feature channels |
+| `out_channels` | int | Unified feature width |
+| `num_outs` | int | Number of output levels |
+| `start_level` | int | Start backbone level |
+| `end_level` | int | End backbone level (`-1` means all) |
+| `add_extra_convs` | bool/str | Add extra conv levels |
+| `relu_before_extra_convs` | bool | ReLU before extra convs |
+| `no_norm_on_lateral` | bool | Disable lateral norm |
+| `conv_cfg` | dict/None | MMCV conv config |
+| `norm_cfg` | dict/None | MMCV norm config |
+| `act_cfg` | dict | Activation config |
+| `upsample_cfg` | dict | Upsampling behavior |
+| `init_cfg` | dict | Initialization settings |
+
+### 7.2 BiFPN Parameters
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `num_bifpn_layers` | int | Number of BiFPN blocks (`0` to disable) |
+| `use_separable_conv` | bool | Use depthwise separable conv in BiFPN |
+
+### 7.3 FGFM Parameters
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `fgfm_enable` | bool | Enable foreground modulation |
+| `fgfm_levels` | list[int]/None | Levels to apply FGFM |
+| `fgfm_alpha` | float | Modulation strength |
+| `fgfm_fg_loss_weight` | float | FGFM loss weight |
+
+### 7.4 Visualization Parameters
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `fg_vis_enable` | bool | Enable/disable visualization |
+| `fg_vis_levels` | list[int]/None | Levels allowed for visualization |
+| `fg_vis_prob` | float | Sampling probability |
+| `fg_vis_thr` | float | Mask threshold |
+| `fg_vis_save_dir` | str | Save directory |
+
+### 7.5 Attention Parameters
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `use_attn` | bool | Enable angle-aware attention |
+| `attn_levels` | list[int]/None | Levels to run attention |
+| `attn_num_heads` | int | Number of heads |
+| `attn_embed_dim` | int/None | Attention embedding dim |
+| `attn_dropout` | float | Attention dropout |
+| `attn_beta` | float | Foreground-bias weight |
+| `attn_orient_scale` | float | Orientation-bias weight |
+
+## 8. How to Write Config for Typical Experiments
+
+### Baseline-like setup
+
+- `fgfm_enable=False`
+- `use_attn=False`
+- `num_bifpn_layers=0`
+- `fg_vis_enable=False`
+
+### FGFM-only setup
+
+- `fgfm_enable=True`
+- `use_attn=False`
+- `num_bifpn_layers=0`
+
+### FGFM + AAMHA setup
+
+- `fgfm_enable=True`
+- `use_attn=True`
+- `num_bifpn_layers=0`
+
+### Full FGAA-FPN setup
+
+- `fgfm_enable=True`
+- `use_attn=True`
+- `num_bifpn_layers>0`
+
+## 9. Train and Evaluate
+
+Single GPU:
 
 ```bash
 python tools/train.py configs/oriented_rcnn/oriented_rcnn_r50_fpn_1x_dota_le90_test.py
 ```
 
-多卡训练：
+Distributed training:
 
 ```bash
-bash tools/dist_train.sh configs/oriented_rcnn/FGAM.py 8
+bash tools/dist_train.sh configs/oriented_rcnn/oriented_rcnn_r50_fpn_1x_dota_le90_test.py 8
 ```
 
-### 6.2 测试与评估
+Evaluation:
+
 ```bash
 python tools/test.py \
-  configs/oriented_rcnn/FGAM.py \
-  work_dirs/xxx/latest.pth \
+  configs/oriented_rcnn/oriented_rcnn_r50_fpn_1x_dota_le90_test.py \
+  work_dirs6/oriented_rcnn_dota15_r50_fgamfpn_1x/latest.pth \
   --eval mAP
 ```
 
-多卡测试：
+## 10. Troubleshooting
 
-```bash
-bash tools/dist_test.sh \
-  configs/oriented_rcnn/FGAM.py \
-  work_dirs/xxx/latest.pth \
-  8 --eval mAP
-```
+### No visualization images are saved
 
-## 7. 配置方式
-你可以通过 `custom_imports` 加载 FGAA-FPN。
+Check all of these:
 
-推荐写法（兼容入口）：
+- `fg_vis_enable=True`
+- `fg_vis_prob` not too small
+- current level included in `fg_vis_levels`
+- `fg_vis_save_dir` is writable
 
-```python
-custom_imports = dict(
-    imports=['mmrotate.models.necks.FGAA_FPN'],
-    allow_failed_imports=False
-)
+### Neck import/build errors
 
-model = dict(
-    type='OrientedRCNN',
-    neck=dict(
-        type='FGAAFPN',  # 或 ABMAFPN（ABMAFPN 是 FGAAFPN 的别名子类）
-        in_channels=[256, 512, 1024, 2048],
-        out_channels=256,
-        num_outs=5,
-        num_bifpn_layers=2,
-        use_separable_conv=True,
-        fgam_enable=True,
-        fgam_levels=[2, 3, 4],
-        fgam_alpha=0.8,
-        fgam_fg_loss_weight=0.7,
-        use_attn=True,
-        attn_levels=[2, 3, 4],
-        attn_num_heads=4,
-        attn_embed_dim=256,
-        attn_dropout=0.1,
-        attn_beta=0.6,
-        attn_orient_scale=0.7,
-    )
-)
-```
+Check:
 
-## 8. 参数说明（FGAAFPN）
-以下参数定义于 `FGAAFPN.__init__`。
+- `custom_imports` path is correct
+- `type='FGAAFPN'` matches registered class
 
-### 8.1 FPN 基础参数
-| 参数 | 默认值 | 说明 | 建议 |
-|---|---:|---|---|
-| `in_channels` | 必填 | Backbone 各层通道数列表 | ResNet50 常用 `[256,512,1024,2048]` |
-| `out_channels` | 必填 | FPN 输出通道数 | 常用 `256` |
-| `num_outs` | 必填 | 输出特征层数 | 常用 `5` |
-| `start_level` | `0` | 从第几个 backbone stage 开始构建金字塔 | 常用 `0` |
-| `end_level` | `-1` | 结束层，`-1` 表示用到最后一层 | 一般保持 `-1` |
-| `add_extra_convs` | `False` | 是否用卷积生成额外层；否则用 max-pool 下采样 | 初期建议 `False` |
-| `relu_before_extra_convs` | `False` | 额外卷积前是否加 ReLU | 与上项联动 |
-| `no_norm_on_lateral` | `False` | lateral 1x1 conv 是否去掉 norm | 数据少时可尝试 `True` |
-| `conv_cfg` | `None` | 卷积配置（MMCV 风格） | 通常保持 `None` |
-| `norm_cfg` | `None` | 归一化配置 | 常用 `dict(type='BN', requires_grad=True)` |
-| `act_cfg` | `dict(type='ReLU')` | 激活函数配置 | 常用默认 |
-| `upsample_cfg` | `dict(mode='bilinear', align_corners=False)` | FPN 上采样配置 | 默认即可 |
-| `init_cfg` | Xavier uniform | 初始化配置 | 默认即可 |
+### FGFM loss is not added to total loss
 
-### 8.2 BiFPN 参数
-| 参数 | 默认值 | 说明 | 建议 |
-|---|---:|---|---|
-| `num_bifpn_layers` | `2` | BiFPN 堆叠层数；`0` 表示关闭 | 先从 `0/1/2` 网格搜索 |
-| `use_separable_conv` | `True` | BiFPN 内是否用深度可分离卷积 | 显存紧张时建议 `True` |
+Current neck exposes `get_fgfm_loss(...)`.
 
-### 8.3 前景调制（FGFM）参数
-| 参数 | 默认值 | 说明 | 建议 |
-|---|---:|---|---|
-| `fgam_enable` | `False` | 是否启用前景分支与门控调制 | 使用 FGAA-FPN 时设为 `True` |
-| `fgam_levels` | `None` | 启用 FGFM 的层索引列表（相对输出金字塔） | 常用 `[2,3,4]` 或 `[0,1,2]` |
-| `fgam_alpha` | `0.5` | 门控强度，作用在 `x * (1 + alpha * M')` | 常用 `0.5~1.0` |
-| `fgam_fg_loss_weight` | `0.3` | 前景监督损失总权重 | 从 `0.1~1.0` 调参 |
+If your detector loop calls `get_fgam_loss(...)`, add a compatibility adapter or rename one side so method names match.
 
-补充：
+## 11. License
 
-- `fgam_levels=None` 时默认对全部输出层生效。
-- 前景损失 `loss_fgam_fg` 只在 `training=True`、`fgam_enable=True`、`fgam_fg_loss_weight>0` 时返回。
-
-### 8.4 角度注意力（AAMHA）参数
-| 参数 | 默认值 | 说明 | 建议 |
-|---|---:|---|---|
-| `use_attn` | `True` | 是否启用角度感知多头注意力 | 初期可先关掉做消融 |
-| `attn_levels` | `None` | 启用注意力的层索引列表 | 常用 `[2,3,4]` |
-| `attn_num_heads` | `4` | 注意力头数 | `4` 或 `8` |
-| `attn_embed_dim` | `None` | 注意力嵌入维度；`None` 等于 `out_channels` | 常用与 `out_channels` 相同 |
-| `attn_dropout` | `0.0` | 注意力 dropout | 小数据集可设 `0.1` |
-| `attn_beta` | `1.0` | 前景偏置强度 | 常用 `0.3~1.0` |
-| `attn_orient_scale` | `1.0` | 方向偏置强度 | 常用 `0.3~1.0` |
-
-## 9. 损失与训练行为
-`FGAAFPN.get_fgam_loss` 当前实现：
-
-- 使用旋转框 rasterize 到各层特征图，生成弱监督前景 GT。
-- 损失形式：`BCE(带前景重加权) + 0.6 * Dice`。
-- 多层损失求平均后乘以 `fgam_fg_loss_weight`，键名为 `loss_fgam_fg`。
-
-总损失（两阶段检测器）可写作：
-
-```text
-loss_total = loss_rpn + loss_roi + loss_fgam_fg(若启用)
-```
-
-## 10. 可视化与调试
-FGAA-FPN 内置了低频率调试输出：
-
-- 随机打印前景统计与注意力前后差异（用于排查梯度/数值问题）。
-- 随机保存前景掩码可视化到 `work_dirs2/fg_vis2/`。
-
-如果你不希望训练期间产生调试输出，可将相关 `debug_print` 或可视化逻辑关闭。
-
-## 11. 常见问题
-### 11.1 `NameError: ConvModule is not defined`
-原因：`FGAAFPN.py` 未导入 `ConvModule`。
-
-修复：确保存在以下导入。
-
-```python
-from mmcv.cnn import ConvModule
-```
-
-### 11.2 配置中找不到 `FGAAFPN`
-检查 `custom_imports` 是否正确，推荐：
-
-```python
-custom_imports = dict(
-    imports=['mmrotate.models.necks.FGAA_FPN'],
-    allow_failed_imports=False
-)
-```
-
-### 11.3 训练显存不足
-可依次尝试：
-
-- 降低 `attn_levels` 数量。
-- 关闭 `use_attn`。
-- 减少 `num_bifpn_layers`。
-- 开启 `use_separable_conv`。
-- 降低输入分辨率或 batch size。
-
-## 12. 结果复现建议
-建议在论文/实验中固定并公开：
-
-- 随机种子、GPU 型号、batch size、训练轮次。
-- `fgam_levels / attn_levels / num_bifpn_layers` 三组关键超参。
-- 使用的配置文件与 checkpoint。
-
-## 13. 引用
-如果你在研究中使用了 FGAA-FPN，请引用你的论文（将下面条目替换为你的正式信息）：
-
-```bibtex
-@article{your_fgaafpn_2026,
-  title   = {FGAA-FPN: Foreground-Guided Angle-Aware Feature Pyramid Network for Rotated Object Detection},
-  author  = {Your Name and Coauthors},
-  journal = {arXiv preprint arXiv:xxxx.xxxxx},
-  year    = {2026}
-}
-```
-
-## 14. License
-本项目代码建议使用 `Apache-2.0`（与 MMRotate 主体协议一致）。
+Use Apache-2.0 for this project (aligned with MMRotate in this workspace).
